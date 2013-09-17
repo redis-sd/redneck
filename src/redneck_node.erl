@@ -319,9 +319,13 @@ terminate(Reason, State=#state{node=Node, transport=Transport, socket=Socket}) -
 %%%-------------------------------------------------------------------
 
 %% @private
-register_node(#state{ring=Ring, node=Node, record=#dns_sd{weight=Weight, priority=Priority}}) ->
-	ryng:set_node(Ring, Node, Weight, Priority).
+register_node(#state{ring=Ring, node=Node, record=#dns_sd{weight=Weight, priority=Priority, domain=Domain, type=Type, service=Service, instance=Instance}}) ->
+	ryng:set_node(Ring, Node, Weight, Priority),
+	redneck_event:nodeup(Ring, Node, {Domain, Type, Service, Instance}),
+	ok.
 
 %% @private
-unregister_node(#state{ring=Ring, node=Node}) ->
-	ryng:del_node(Ring, Node).
+unregister_node(#state{ring=Ring, node=Node, record=#dns_sd{domain=Domain, type=Type, service=Service, instance=Instance}}) ->
+	ryng:del_node(Ring, Node),
+	redneck_event:nodedown(Ring, Node, {Domain, Type, Service, Instance}),
+	ok.

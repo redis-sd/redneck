@@ -87,7 +87,17 @@ ring() ->
 ring(#dns_sd{domain=Domain, type=Type, service=Service}) ->
 	ring({Domain, Type, Service});
 ring({Domain, Type, Service}) ->
-	list_to_atom(integer_to_list(erlang:phash2({Domain, Type, Service}))).
+	list_to_atom(integer_to_list(erlang:phash2({Domain, Type, Service})));
+ring(ServiceRef) when is_atom(ServiceRef) ->
+	case redis_sd_client:list(ServiceRef) of
+		[{{{browse, ServiceRef}, {Domain, Type, Service, _Instance}}, _} | _] ->
+			ring({Domain, Type, Service});
+		_ ->
+			{error, ring_not_found}
+	end;
+ring(ServiceName) ->
+	ServiceRef = browse_name(ServiceName),
+	ring(ServiceRef).
 
 get_port() ->
 	try
@@ -148,7 +158,7 @@ handle_call({watch, BrowseName, BrowseConfig}, _From, State=#state{monitors=Moni
 		undefined ->
 			case start_browse(BrowseName, BrowseConfig) of
 				{ok, BrowsePid} ->
-					{ok, BrowsePid};
+					{ok, BrowsePid, BrowseName};
 				StartError ->
 					StartError
 			end;
@@ -186,6 +196,7 @@ handle_call({connect, Record=#dns_sd{}}, _From, State) ->
 			ok;
 		false ->
 			_ = ryng:new_ring([{name, Ring}]),
+			redneck_event:ringup(Ring, {Record#dns_sd.domain, Record#dns_sd.type, Record#dns_sd.service}),
 			ok
 	end,
 	ok = redneck_node:connect(Record),
@@ -195,7 +206,8 @@ handle_call({disconnect, Record=#dns_sd{}}, _From, State) ->
 	Ring = redneck_kernel:ring(Record),
 	case ryng:is_ring_empty(Ring) of
 		true ->
-			ryng:rm_ring(Ring);
+			ryng:rm_ring(Ring),
+			redneck_event:ringdown(Ring, {Record#dns_sd.domain, Record#dns_sd.type, Record#dns_sd.service});
 		_ ->
 			ok
 	end,
