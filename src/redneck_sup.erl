@@ -35,6 +35,9 @@ start_link() ->
 
 init([]) ->
 	redneck_names = ets:new(redneck_names, [ordered_set, public, named_table]),
+	ManagerSpec = {redneck_event:manager(),
+		{gen_event, start_link, [{local, redneck_event:manager()}]},
+		permanent, 5000, worker, [gen_event]},
 	RedneckSpec = {redneck,
 		{redneck, start_link, []},
 		permanent, 5000, worker, [redneck]},
@@ -46,7 +49,7 @@ init([]) ->
 		permanent, 5000, worker, [redneck_kernel]},
 	%% five restarts in 60 seconds, then shutdown
 	Restart = {rest_for_one, 5, 60},
-	{ok, {Restart, [RedneckSpec, ServerSpec, KernelSpec]}}.
+	{ok, {Restart, [ManagerSpec, RedneckSpec, ServerSpec, KernelSpec]}}.
 
 %%%-------------------------------------------------------------------
 %%% Internal functions
