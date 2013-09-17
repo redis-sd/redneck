@@ -32,7 +32,7 @@
 	-> term().
 
 %% redneck_handler callbacks
--export([init/2, handle_message/2, handle_info/2, terminate/2]).
+-export([init/2, handle_call/3, handle_cast/2, handle_message/2, handle_info/2, terminate/2]).
 
 %%%===================================================================
 %%% redneck_handler callbacks
@@ -40,11 +40,19 @@
 
 %% @private
 init(_Transport, _Options) ->
-    {ok, stateless}.
+	{ok, stateless}.
+
+%% @private
+handle_call(Request, _From, State) ->
+	{reply, {ok, Request, redneck:node()}, State}.
+
+%% @private
+handle_cast(_Message, State) ->
+	{noreply, State}.
 
 %% @private
 handle_message(_Message, State) ->
-    {noreply, State}.
+	{noreply, State}.
 
 %% @private
 handle_info(_Info, State) ->
@@ -52,4 +60,4 @@ handle_info(_Info, State) ->
 
 %% @private
 terminate(_Reason, _State) ->
-    ok.
+	ok.

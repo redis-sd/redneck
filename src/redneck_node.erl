@@ -11,6 +11,7 @@
 -module(redneck_node).
 
 -include("redneck.hrl").
+-include("redneck_internal.hrl").
 
 %% API
 -export([start_link/1, call/2, call/3, cast/2, reply/2, connect/1, disconnect/1]).
@@ -46,7 +47,7 @@ start_link(Record=#dns_sd{}) ->
 	proc_lib:start_link(?MODULE, init, [Record]).
 
 call(Node, Request) ->
-	case catch gen:call({via, redneck, Node}, '$redneck_call', Request) of
+	case catch gen:call({via, redneck, Node}, '$redneck_node_call', Request) of
 		{ok, Result} ->
 			Result;
 		{'EXIT', Reason} ->
@@ -54,7 +55,7 @@ call(Node, Request) ->
 	end.
 
 call(Node, Request, Timeout) ->
-	case catch gen:call({via, redneck, Node}, '$redneck_call', Request, Timeout) of
+	case catch gen:call({via, redneck, Node}, '$redneck_node_call', Request, Timeout) of
 		{ok, Result} ->
 			Result;
 		{'EXIT', Reason} ->
@@ -62,7 +63,7 @@ call(Node, Request, Timeout) ->
 	end.
 
 cast(Node, Request) ->
-	catch redneck:send(Node, {'$redneck_cast', Request}),
+	catch redneck:send(Node, {'$redneck_node_cast', Request}),
 	ok.
 
 reply(From, Reply) ->
@@ -156,10 +157,19 @@ loop(State=#state{socket=undefined, bref=BRef}, SoFar) ->
 		{timeout, BRef, connect} ->
 			State2 = State#state{bref=undefined},
 			connect_loop(State2);
-		{'$redneck_call', From, Request} ->
-			handle_call(State, SoFar, Request, From, fun loop/2);
-		{'$redneck_cast', Request} ->
-			handle_cast(State, SoFar, Request, fun loop/2);
+		{'$redneck_node_call', From, Request} ->
+			handle_node_call(State, SoFar, Request, From, fun loop/2);
+		{'$redneck_node_cast', Request} ->
+			handle_node_cast(State, SoFar, Request, fun loop/2);
+		{'$redneck_call', {Node, {From, Tag}}, _Request} ->
+			catch From ! {nodedown, Tag, Node},
+			loop(State, SoFar);
+		{'$redneck_cast', _Request} ->
+			loop(State, SoFar);
+		{'$redneck_reply', _From, _Reply} ->
+			loop(State, SoFar);
+		{'$redneck', _Message} ->
+			loop(State, SoFar);
 		Info ->
 			error_logger:warning_msg(
 				"** ~p ~p unhandled info in ~p/~p~n"
@@ -186,12 +196,21 @@ loop(State=#state{socket=Socket, messages={OK, Closed, Error}, timeout_ref=TRef}
 			terminate(timeout, State);
 		{timeout, OlderTRef, ?MODULE} when is_reference(OlderTRef) ->
 			loop(State, SoFar);
+		{'$redneck_node_call', From, Request} ->
+			handle_node_call(State, SoFar, Request, From, fun loop/2);
+		{'$redneck_node_cast', Request} ->
+			handle_node_cast(State, SoFar, Request, fun loop/2);
+		{'$redneck_call', From, Request} ->
+			Message = {?REDNECK_REQUEST, From, Request},
+			send(State, SoFar, Message, fun before_loop/2);
+		{'$redneck_cast', Request} ->
+			Message = {?REDNECK_NOTIFY, Request},
+			send(State, SoFar, Message, fun before_loop/2);
+		{'$redneck_reply', From, Reply} ->
+			Message = {?REDNECK_RESPONSE, From, Reply},
+			send(State, SoFar, Message, fun before_loop/2);
 		{'$redneck', Message} ->
 			send(State, SoFar, Message, fun before_loop/2);
-		{'$redneck_call', From, Request} ->
-			handle_call(State, SoFar, Request, From, fun loop/2);
-		{'$redneck_cast', Request} ->
-			handle_cast(State, SoFar, Request, fun loop/2);
 		Info ->
 			error_logger:warning_msg(
 				"** ~p ~p unhandled info in ~p/~p~n"
@@ -236,7 +255,7 @@ parse_data(State, Data) ->
 	before_loop(State, Data).
 
 %% @private
-handle_call(State=#state{socket=Socket, node=Node, ring=Ring, record=Record}, SoFar, info, From, NextState) ->
+handle_node_call(State=#state{socket=Socket, node=Node, ring=Ring, record=Record}, SoFar, info, From, NextState) ->
 	Connected = case Socket of
 		undefined ->
 			down;
@@ -245,26 +264,26 @@ handle_call(State=#state{socket=Socket, node=Node, ring=Ring, record=Record}, So
 	end,
 	_ = reply(From, {Node, Ring, Connected, Record}),
 	NextState(State, SoFar);
-handle_call(State=#state{ring=Ring}, SoFar, ring, From, NextState) ->
+handle_node_call(State=#state{ring=Ring}, SoFar, ring, From, NextState) ->
 	_ = reply(From, Ring),
 	NextState(State, SoFar);
-handle_call(State=#state{ring=Ring, record=#dns_sd{domain=Domain, type=Type, service=Service}}, SoFar, ring_info, From, NextState) ->
+handle_node_call(State=#state{ring=Ring, record=#dns_sd{domain=Domain, type=Type, service=Service}}, SoFar, ring_info, From, NextState) ->
 	{ok, RingObj} = ryng:get_ring(Ring),
 	_ = reply(From, {Ring, {Domain, Type, Service}, RingObj}),
 	NextState(State, SoFar);
-handle_call(State, SoFar, _Request, From, NextState) ->
+handle_node_call(State, SoFar, _Request, From, NextState) ->
 	_ = reply(From, {error, undef}),
 	NextState(State, SoFar).
 
 %% @private
-handle_cast(State=#state{record=Record}, SoFar, {connect, Record}, NextState) ->
+handle_node_cast(State=#state{record=Record}, SoFar, {connect, Record}, NextState) ->
 	NextState(State, SoFar);
-handle_cast(State, SoFar, {connect, Record}, NextState) ->
+handle_node_cast(State, SoFar, {connect, Record}, NextState) ->
 	State2 = State#state{record=Record},
 	NextState(State2, SoFar);
-handle_cast(State, _SoFar, disconnect, _NextState) ->
+handle_node_cast(State, _SoFar, disconnect, _NextState) ->
 	terminate(normal, State);
-handle_cast(State, SoFar, _Request, NextState) ->
+handle_node_cast(State, SoFar, _Request, NextState) ->
 	NextState(State, SoFar).
 
 %% @private

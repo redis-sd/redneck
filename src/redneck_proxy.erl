@@ -50,10 +50,19 @@ loop(ProxyTo, Monitor, Node, Timeout) ->
 			ok = redneck:unregister_name(Node),
 			ProxyTo ! Message,
 			erlang:exit(normal);
-		Message = {'$redneck_call', {Pid, Tag}, _Request} when is_pid(Pid) andalso is_reference(Tag) ->
+		{'$redneck_call', {Pid, Tag}, Request} when is_pid(Pid) andalso is_reference(Tag) ->
+			ProxyTo ! {'$redneck_call', {redneck:node(), {Pid, Tag}}, Request},
+			loop(ProxyTo, Monitor, Node, Timeout);
+		{'$redneck_cast', Request} ->
+			ProxyTo ! {'$redneck_cast', Request},
+			loop(ProxyTo, Monitor, Node, Timeout);
+		{'$redneck_reply', From, Reply} ->
+			ProxyTo ! {'$redneck_reply', From, Reply},
+			loop(ProxyTo, Monitor, Node, Timeout);
+		Message = {'$redneck_node_call', {Pid, Tag}, _Request} when is_pid(Pid) andalso is_reference(Tag) ->
 			ProxyTo ! Message,
 			loop(ProxyTo, Monitor, Node, Timeout);
-		Message = {'$redneck_cast', _Request} ->
+		Message = {'$redneck_node_cast', _Request} ->
 			ProxyTo ! Message,
 			loop(ProxyTo, Monitor, Node, Timeout);
 		Message ->

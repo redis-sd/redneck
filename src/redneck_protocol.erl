@@ -11,6 +11,9 @@
 -module(redneck_protocol).
 -behaviour(ranch_protocol).
 
+-include("redneck.hrl").
+-include("redneck_internal.hrl").
+
 %% ranch_protocol callbacks
 -export([start_link/4]).
 
@@ -75,6 +78,50 @@ handler_init(State=#state{transport=Transport}, Handler, HandlerOpts) ->
 				"** Handler options were ~p~n** Stacktrace: ~p~n~n",
 				[?MODULE, self(), handler_init, 3, Class, Reason, Handler, HandlerOpts, erlang:get_stacktrace()]),
 			terminate(Reason, State)
+	end.
+
+%% @private
+handler_call(State, {Handler, HandlerState}, Data, Callback, From, Request, NextState) ->
+	try Handler:Callback(Request, From, HandlerState) of
+		{reply, Reply, HandlerState2} ->
+			_ = redneck:reply(From, Reply),
+			State2 = loop_timeout(State),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{reply, Reply, HandlerState2, hibernate} ->
+			_ = redneck:reply(From, Reply),
+			State2 = loop_timeout(State#state{hibernate=true}),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{reply, Reply, HandlerState2, Timeout} ->
+			_ = redneck:reply(From, Reply),
+			State2 = loop_timeout(State#state{timeout=Timeout}),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{reply, Reply, HandlerState2, Timeout, hibernate} ->
+			_ = redneck:reply(From, Reply),
+			State2 = loop_timeout(State#state{timeout=Timeout, hibernate=true}),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{noreply, HandlerState2} ->
+			State2 = loop_timeout(State),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{noreply, HandlerState2, hibernate} ->
+			State2 = loop_timeout(State#state{hibernate=true}),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{noreply, HandlerState2, Timeout} ->
+			State2 = loop_timeout(State#state{timeout=Timeout}),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{noreply, HandlerState2, Timeout, hibernate} ->
+			State2 = loop_timeout(State#state{timeout=Timeout, hibernate=true}),
+			NextState(State2, {Handler, HandlerState2}, Data);
+		{stop, Reason, HandlerState2} ->
+			handler_terminate(State, {Handler, HandlerState2}, Reason)
+	catch
+		Class:Reason ->
+			error_logger:error_msg(
+				"** ~p ~p terminating in ~p/~p~n"
+				"   for the reason ~p:~p~n** Callback was ~p~n"
+				"** From was ~p~n** Request was ~p~n** Handler was ~p~n"
+				"** Handler state was ~p~n** Stacktrace: ~p~n~n",
+				[?MODULE, self(), handler_call, 7, Class, Reason, Callback, From, Request, Handler, HandlerState, erlang:get_stacktrace()]),
+			handler_terminate(State, {Handler, HandlerState}, Reason)
 	end.
 
 %% @private
@@ -165,8 +212,15 @@ parse_data(State, HandlerState, << Len:4/big-unsigned-integer-unit:8, Data/binar
 	Binary = binary_part(Data, 0, Len),
 	Rest = binary_part(Data, Len, byte_size(Data) - Len),
 	try erlang:binary_to_term(Binary) of
-		Term ->
-			handler_message(State, HandlerState, Rest, handle_message, Term, fun parse_data/3)
+		{?REDNECK_REQUEST, From, Request} ->
+			handler_call(State, HandlerState, Rest, handle_call, From, Request, fun parse_data/3);
+		{?REDNECK_RESPONSE, {To, Tag}, Reply} ->
+			catch To ! {Tag, Reply},
+			parse_data(State, HandlerState, Rest);
+		{?REDNECK_NOTIFY, Message} ->
+			handler_message(State, HandlerState, Rest, handle_cast, Message, fun parse_data/3);
+		Message ->
+			handler_message(State, HandlerState, Rest, handle_message, Message, fun parse_data/3)
 	catch
 		Class:Reason ->
 			error_logger:error_msg(

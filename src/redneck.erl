@@ -24,7 +24,7 @@
 -export([new_browse/1, rm_browse/1, delete_browse/1]).
 
 %% Name Server API
--export([register_name/2, whereis_name/1, unregister_name/1, send/2]).
+-export([register_name/2, whereis_name/1, unregister_name/1, send/2, call/2, call/3, cast/2, reply/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -50,7 +50,7 @@ manual_start() ->
 		redis_sd_client,
 		redis_sd_server,
 		redneck
-		% ,sasl
+		,sasl
 	]).
 
 %% @private
@@ -158,6 +158,30 @@ send(Name, Msg) ->
 			erlang:error(badarg, [Name, Msg])
 	end.
 
+call(Name, Request) ->
+	case catch do_call(Name, '$redneck_call', Request, 5000) of
+		{ok, Reply} ->
+			Reply;
+		{'EXIT', Reason} ->
+			exit({Reason, {?MODULE, call, [Name, Request]}})
+	end.
+
+call(Name, Request, Timeout) ->
+	case catch do_call(Name, '$redneck_call', Request, Timeout) of
+		{ok, Reply} ->
+			Reply;
+		{'EXIT', Reason} ->
+			exit({Reason, {?MODULE, call, [Name, Request, Timeout]}})
+	end.
+
+cast(Name, Message) ->
+	catch send(Name, {'$redneck_cast', Message}),
+	ok.
+
+reply({Node, From}, Reply) ->
+	catch redneck:send(Node, {'$redneck_reply', From, Reply}),
+	Reply.
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -208,3 +232,65 @@ code_change(_OldVsn, State, _Extra) ->
 %%%-------------------------------------------------------------------
 %%% Internal functions
 %%%-------------------------------------------------------------------
+
+%% @private
+do_call(Name, Label, Request, Timeout) ->
+	case whereis_name(Name) of
+		undefined ->
+			exit(noproc);
+		Process when is_pid(Process) ->
+			try erlang:monitor(process, Process) of
+				MRef ->
+					catch erlang:send(Process, {Label, {self(), MRef}, Request}, [noconnect]),
+					receive
+						{MRef, Reply} ->
+							erlang:demonitor(MRef, [flush]),
+							{ok, Reply};
+						{nodedown, MRef, Node} ->
+							exit({nodedown, Node});
+						{'DOWN', MRef, _, _, noconnection} ->
+							Node = get_node(Process),
+							exit({nodedown, Node});
+						{'DOWN', MRef, _, _, Reason} ->
+							exit(Reason)
+					after
+						Timeout ->
+							erlang:demonitor(MRef, [flush]),
+							exit(timeout)
+					end
+			catch
+				error:_ ->
+					Node = get_node(Process),
+					erlang:monitor_node(Node, true),
+					receive
+						{nodedown, Node} ->
+							erlang:monitor_node(Node, false),
+							exit({nodedown, Node})
+					after
+						0 ->
+							Tag = erlang:make_ref(),
+							Process ! {Label, {self(), Tag}, Request},
+							receive
+								{Tag, Reply} ->
+									erlang:monitor_node(Node, false),
+									{ok, Reply};
+								{nodedown, Node} ->
+									erlang:monitor_node(Node, false),
+									exit({nodedown, Node})
+							after
+								Timeout ->
+									erlang:monitor_node(Node, false),
+									exit(timeout)
+							end
+					end
+			end
+	end.
+
+%% @private
+get_node(Process) ->
+	case Process of
+		{_S, N} when is_atom(N) ->
+			N;
+		_ when is_pid(Process) ->
+			erlang:node(Process)
+	end.
