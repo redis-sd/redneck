@@ -278,6 +278,10 @@ handle_node_call(State, SoFar, _Request, From, NextState) ->
 %% @private
 handle_node_cast(State=#state{record=Record}, SoFar, {connect, Record}, NextState) ->
 	NextState(State, SoFar);
+handle_node_cast(State=#state{socket=undefined, bref=BRef}, _SoFar, {connect, Record}, _NextState) ->
+	catch erlang:cancel_timer(BRef),
+	State2 = State#state{record=Record, bref=undefined},
+	connect_loop(State2);
 handle_node_cast(State, SoFar, {connect, Record}, NextState) ->
 	State2 = State#state{record=Record},
 	NextState(State2, SoFar);
