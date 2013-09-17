@@ -16,6 +16,22 @@
 	| {ok, State::any(), Timeout::timeout()}
 	| {ok, State::any(), Timeout::timeout(), hibernate}
 	| {stop, Reason::any()}.
+-callback handle_call(Request::any(), From::{non_neg_integer(), {pid(), reference()}}, State::any())
+	-> {reply, Reply::any(), State::any()}
+	| {reply, Reply::any(), State::any(), hibernate}
+	| {reply, Reply::any(), State::any(), Timeout::timeout()}
+	| {reply, Reply::any(), State::any(), Timeout::timeout(), hibernate}
+	| {noreply, State::any()}
+	| {noreply, State::any(), hibernate}
+	| {noreply, State::any(), Timeout::timeout()}
+	| {noreply, State::any(), Timeout::timeout(), hibernate}
+	| {stop, Reason::any(), State::any()}.
+-callback handle_cast(Request::any(), State::any())
+	-> {noreply, State::any()}
+	| {noreply, State::any(), hibernate}
+	| {noreply, State::any(), Timeout::timeout()}
+	| {noreply, State::any(), Timeout::timeout(), hibernate}
+	| {stop, Reason::any(), State::any()}.
 -callback handle_message(Message::any(), State::any())
 	-> {noreply, State::any()}
 	| {noreply, State::any(), hibernate}
@@ -32,7 +48,8 @@
 	-> term().
 
 %% redneck_handler callbacks
--export([init/2, handle_call/3, handle_cast/2, handle_message/2, handle_info/2, terminate/2]).
+-export([init/2, handle_call/3, handle_cast/2, handle_message/2,
+	handle_info/2, terminate/2]).
 
 %%%===================================================================
 %%% redneck_handler callbacks
@@ -43,11 +60,11 @@ init(_Transport, _Options) ->
 	{ok, stateless}.
 
 %% @private
-handle_call(Request, _From, State) ->
-	{reply, {ok, Request, redneck:node()}, State}.
+handle_call(_Request, _From, State) ->
+	{reply, {error, undef}, State}.
 
 %% @private
-handle_cast(_Message, State) ->
+handle_cast(_Request, State) ->
 	{noreply, State}.
 
 %% @private
