@@ -2,8 +2,8 @@
 %% vim: ts=4 sw=4 ft=erlang noet
 
 {application, redneck, [
-	{description, "Redis Service Discovery Erlang term server."},
-	{vsn, "0.0.0"},
+	{description, "Redis Service Discovery Erlang Term Server."},
+	{vsn, "0.2.0"},
 	{modules, []},
 	{registered, []},
 	{applications, [

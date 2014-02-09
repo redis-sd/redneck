@@ -2,41 +2,43 @@
 %% vim: ts=4 sw=4 ft=erlang noet
 %%%-------------------------------------------------------------------
 %%% @author Andrew Bennett <andrew@pagodabox.com>
-%%% @copyright 2013, Pagoda Box, Inc.
+%%% @copyright 2014, Pagoda Box, Inc.
 %%% @doc
 %%%
 %%% @end
-%%% Created :  17 Sep 2013 by Andrew Bennett <andrew@pagodabox.com>
+%%% Created :  07 Feb 2014 by Andrew Bennett <andrew@pagodabox.com>
 %%%-------------------------------------------------------------------
--module(redneck_event).
+-module(redneck_node_event).
 
 -include("redneck.hrl").
 
+-define(MANAGER, redneck_node_manager).
+
 %% API
 -export([manager/0, add_handler/2]).
--export([nodeup/3, nodedown/3, ringup/2, ringdown/2]).
+-export([add/1, expire/1, up/1, down/1]).
 
 %%%===================================================================
 %%% API functions
 %%%===================================================================
 
 manager() ->
-	redneck_event.
+	?MANAGER.
 
 add_handler(Handler, Pid) ->
 	gen_event:add_handler(manager(), Handler, Pid).
 
-nodeup(Ring, Node, {Domain, Type, Service, Instance}) ->
-	notify({nodeup, Ring, Node, {Domain, Type, Service, Instance}}).
+add(Node) ->
+	notify({node, add, Node}).
 
-nodedown(Ring, Node, {Domain, Type, Service, Instance}) ->
-	notify({nodedown, Ring, Node, {Domain, Type, Service, Instance}}).
+expire(Node) ->
+	notify({node, expire, Node}).
 
-ringup(Ring, {Domain, Type, Service}) ->
-	notify({ringup, Ring, {Domain, Type, Service}}).
+up(Node) ->
+	notify({node, up, Node}).
 
-ringdown(Ring, {Domain, Type, Service}) ->
-	notify({ringdown, Ring, {Domain, Type, Service}}).
+down(Node) ->
+	notify({node, down, Node}).
 
 %%%-------------------------------------------------------------------
 %%% Internal functions

@@ -2,19 +2,19 @@
 %% vim: ts=4 sw=4 ft=erlang noet
 %%%-------------------------------------------------------------------
 %%% @author Andrew Bennett <andrew@pagodabox.com>
-%%% @copyright 2013, Pagoda Box, Inc.
+%%% @copyright 2014, Pagoda Box, Inc.
 %%% @doc
 %%%
 %%% @end
-%%% Created :  10 Sep 2013 by Andrew Bennett <andrew@pagodabox.com>
+%%% Created :  08 Feb 2013 by Andrew Bennett <andrew@pagodabox.com>
 %%%-------------------------------------------------------------------
 -module(redneck_proxy).
 
 -include("redneck.hrl").
 
 %% API
--export([start_link/2]).
--export([init/2]).
+-export([start_link/1]).
+-export([init/1]).
 -export([loop/4]).
 
 %%%===================================================================
@@ -22,21 +22,26 @@
 %%%===================================================================
 
 %% @private
-start_link(ProxyTo, Record=#dns_sd{}) when is_pid(ProxyTo) ->
-	proc_lib:start_link(?MODULE, init, [ProxyTo, Record]).
+start_link(Node=?REDNECK_NODE()) ->
+	proc_lib:start_link(?MODULE, init, [Node]).
 
 %% @private
-init(ProxyTo, Record=#dns_sd{}) ->
-	Node = redneck_kernel:node(Record),
-	case redneck:register_name(Node, self()) of
+init(Node=?REDNECK_NODE()) ->
+	case redneck_internal:register_name({proxy, Node}, self()) of
 		yes ->
 			ok = proc_lib:init_ack({ok, self()}),
-			Monitor = erlang:monitor(process, ProxyTo),
-			Timeout = timer:minutes(5),
-			loop(ProxyTo, Monitor, Node, Timeout);
+			case redneck_internal:whereis_name({client, Node}) of
+				ProxyTo when is_pid(ProxyTo) ->
+					Monitor = erlang:monitor(process, ProxyTo),
+					Timeout = timer:minutes(5),
+					loop(ProxyTo, Monitor, Node, Timeout);
+				undefined ->
+					ok = redneck_internal:unregister_name(Node),
+					erlang:exit({error, no_client})
+			end;
 		no ->
 			ok = redneck:unregister_name(Node),
-			ok = proc_lib:init_ack({error, {already_started, redneck:whereis_name(Node)}}),
+			ok = proc_lib:init_ack({error, {already_started, redneck_internal:whereis_name({proxy, Node})}}),
 			erlang:exit(normal)
 	end.
 
@@ -44,29 +49,16 @@ init(ProxyTo, Record=#dns_sd{}) ->
 loop(ProxyTo, Monitor, Node, Timeout) ->
 	receive
 		{'DOWN', Monitor, process, ProxyTo, Reason} ->
-			ok = redneck:unregister_name(Node),
+			ok = redneck_internal:unregister_name({proxy, Node}),
 			erlang:exit(Reason);
-		Message = '$redneck_disconnect' ->
-			ok = redneck:unregister_name(Node),
-			ProxyTo ! Message,
-			erlang:exit(normal);
-		{'$redneck_call', {Pid, Tag}, Request} when is_pid(Pid) andalso is_reference(Tag) ->
-			ProxyTo ! {'$redneck_call', {redneck:node(), {Pid, Tag}}, Request},
-			loop(ProxyTo, Monitor, Node, Timeout);
-		{'$redneck_cast', Request} ->
-			ProxyTo ! {'$redneck_cast', Request},
-			loop(ProxyTo, Monitor, Node, Timeout);
-		{'$redneck_reply', From, Reply} ->
-			ProxyTo ! {'$redneck_reply', From, Reply},
-			loop(ProxyTo, Monitor, Node, Timeout);
-		Message = {'$redneck_node_call', {Pid, Tag}, _Request} when is_pid(Pid) andalso is_reference(Tag) ->
+		Message=?REDNECK_MSG{} ->
 			ProxyTo ! Message,
 			loop(ProxyTo, Monitor, Node, Timeout);
-		Message = {'$redneck_node_cast', _Request} ->
-			ProxyTo ! Message,
+		{{'$redneck_call', From=?REDNECK_NODE()}, Tag, Request} ->
+			ProxyTo ! redneck_msg:new(Node, From, Tag, Request),
 			loop(ProxyTo, Monitor, Node, Timeout);
 		Message ->
-			ProxyTo ! {'$redneck', Message},
+			ProxyTo ! redneck_msg:new(Node, Message),
 			loop(ProxyTo, Monitor, Node, Timeout)
 	after
 		Timeout ->
