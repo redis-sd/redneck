@@ -8,10 +8,11 @@
 %%% @end
 %%% Created :  07 Feb 2014 by Andrew Bennett <andrew@pagodabox.com>
 %%%-------------------------------------------------------------------
--module(redneck_node_example).
+-module(test_node).
 -behaviour(redneck_node_server).
 
--export([start_link/0]).
+%% API
+-export([start_link/1]).
 
 %% redneck_node_server callbacks
 -export([init/3, handle_redneck_call/3, handle_redneck_cast/2,
@@ -23,25 +24,40 @@
 	meta
 }).
 
-start_link() ->
-	redneck_sup:start_node(redneck_node_server, [{mod, ?MODULE}, {name, {local, ?MODULE}}], [{name, redneck_node_server}]).
+%%%===================================================================
+%%% API functions
+%%%===================================================================
+
+start_link(ServiceOptions) when is_list(ServiceOptions) ->
+	redneck_sup:start_node(redneck_node_server,
+		[{mod, ?MODULE}, {name, {local, ?MODULE}}],
+		ServiceOptions).
+
+%%%===================================================================
+%%% redneck_node_server callbacks
+%%%===================================================================
 
 init(Node, Meta, _Options) ->
 	State = #state{node=Node, meta=Meta},
 	{ok, State}.
 
 handle_redneck_call(Request, _From, State) ->
-	{reply, {echo, os:timestamp(), Request}, State}.
+	Reply = {echo_call, Request},
+	{reply, Reply, State}.
 
-handle_redneck_cast(Request, State) ->
-	io:format("CAST: ~p~n", [Request]),
+handle_redneck_cast({Pid, Request}, State) when is_pid(Pid) ->
+	catch Pid ! {echo_cast, Request},
+	{noreply, State};
+handle_redneck_cast(_Request, State) ->
 	{noreply, State}.
 
-handle_redneck({notify, Message}, State) ->
-	io:format("NOTIFY: ~p~n", [Message]),
+handle_redneck({notify, {Pid, Message}}, State) when is_pid(Pid) ->
+	catch Pid ! {echo_notify, Message},
+	{noreply, State};
+handle_redneck({notify, _Message}, State) ->
 	{noreply, State};
 handle_redneck({request, From, Message}, State) ->
-	io:format("REQUEST: ~p ~p~n", [From, Message]),
+	redneck:reply(From, {echo_request, Message}),
 	{noreply, State};
 handle_redneck({syn, Node, Meta}, State) ->
 	{noreply, State#state{node=Node, meta=Meta}};
@@ -56,8 +72,7 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Request, State) ->
 	{noreply, State}.
 
-handle_info(Info, State) ->
-	io:format("INFO: ~p~n", [Info]),
+handle_info(_Info, State) ->
 	{noreply, State}.
 
 terminate(_Reason, _State) ->

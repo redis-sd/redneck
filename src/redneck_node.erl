@@ -30,7 +30,8 @@
 	node    = undefined :: undefined | redneck_node(),
 	meta    = undefined :: undefined | redneck_meta(),
 	child   = undefined :: undefined | pid(),
-	monitor = undefined :: undefined | reference()
+	monitor = undefined :: undefined | reference(),
+	killer  = undefined :: undefined | {pid(), reference()}
 }).
 
 %%%===================================================================
@@ -92,8 +93,8 @@ init({Mod, Options, Service=?REDIS_SD_SERVICE{name=ServiceName}}) ->
 	end.
 
 %% @private
-handle_call(stop, _From, State) ->
-	{stop, normal, ok, State};
+handle_call(stop, From, State) ->
+	{stop, normal, State#state{killer=From}};
 handle_call(_Request, _From, State) ->
 	{reply, ignore, State}.
 
@@ -139,8 +140,10 @@ handle_info(Info, State) ->
 	{noreply, State}.
 
 %% @private
-terminate(normal, #state{child=Child, node=Node}) ->
+terminate(normal, #state{child=Child, node=Node, killer=Killer, service=?REDIS_SD_SERVICE{name=ServiceName}}) ->
+	catch redis_sd_server:rm_service(ServiceName),
 	catch Child ! {'$redneck_node', {close, Node}},
+	catch gen_server:reply(Killer, ok),
 	ok;
 terminate(Reason, #state{child=Child, node=Node}) ->
 	catch Child ! {'$redneck_node', {error, Node, Reason}},

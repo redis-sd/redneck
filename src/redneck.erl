@@ -342,6 +342,22 @@ handle_info({'$redis_sd', {record, expire, Key, Record, Browse}}, State) ->
 	{noreply, State};
 handle_info({'$redis_sd', _Event}, State) ->
 	{noreply, State};
+handle_info({'$redneck', {node, up, Node}}, State) ->
+	case ets:lookup(?TAB, {node, Node}) of
+		[{{node, Node}, {BrowseRef, Key, Meta}, _OldStatus}] ->
+			true = ets:insert(?TAB, {{node, Node}, {BrowseRef, Key, Meta}, true}),
+			{noreply, State};
+		_ ->
+			{noreply, State}
+	end;
+handle_info({'$redneck', {node, down, Node}}, State) ->
+	case ets:lookup(?TAB, {node, Node}) of
+		[{{node, Node}, {BrowseRef, Key, Meta}, _OldStatus}] ->
+			true = ets:insert(?TAB, {{node, Node}, {BrowseRef, Key, Meta}, false}),
+			{noreply, State};
+		_ ->
+			{noreply, State}
+	end;
 handle_info({'$redneck', _Event}, State) ->
 	{noreply, State};
 handle_info({'DOWN', MonitorRef, process, Pid, _Reason}, State=#state{monitors=Monitors}) ->
@@ -397,6 +413,7 @@ maybe_connect(Key, Record=?REDIS_SD_DNS{}, Browse=?REDIS_SD_BROWSE{ref=BrowseRef
 				R ->
 					case R of
 						[] ->
+							true = ets:insert(?TAB, {{node, Node}, {BrowseRef, Key, Meta}, false}),
 							redneck_node_event:add(Node);
 						_ ->
 							ok
@@ -412,8 +429,8 @@ maybe_connect(Key, Record=?REDIS_SD_DNS{}, Browse=?REDIS_SD_BROWSE{ref=BrowseRef
 maybe_disconnect(Key, Record=?REDIS_SD_DNS{}, Browse=?REDIS_SD_BROWSE{}) ->
 	case is_valid_node(Record, Browse) of
 		{true, Endpoint={Node=?REDNECK_NODE(), ?REDNECK_META{}}} ->
-			redneck_node_event:expire(Node),
 			true = ets:delete(?TAB, {node, Node}),
+			redneck_node_event:expire(Node),
 			_ = redneck_sup:start_worker(Endpoint, Key, Record, Browse, disconnect),
 			ok;
 		false ->
