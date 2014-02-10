@@ -12,6 +12,10 @@
 
 -include("redneck.hrl").
 
+%% Start a new node process for the given node.
+-callback start_link(Node::redneck_node(), Options::any())
+	-> {ok, ClientPid::pid()}.
+
 %% API
 -export([start_link/3]).
 -export([ack/1, ack/3, stop/1]).
@@ -33,8 +37,8 @@
 %%% API functions
 %%%===================================================================
 
-start_link(Mod, Args, Service=?REDIS_SD_SERVICE{name=ServiceName}) ->
-	gen_server:start_link({via, redneck_internal, {node, ServiceName}}, ?MODULE, {Mod, Args, Service?REDIS_SD_SERVICE{enabled=false}}, []).
+start_link(Mod, Options, Service=?REDIS_SD_SERVICE{name=ServiceName}) ->
+	gen_server:start_link({via, redneck_internal, {node, ServiceName}}, ?MODULE, {Mod, Options, Service?REDIS_SD_SERVICE{enabled=false}}, []).
 
 ack(Node) ->
 	receive
@@ -54,26 +58,26 @@ stop(ServiceName) ->
 %%%===================================================================
 
 %% @private
-init({Mod, Args, Service=?REDIS_SD_SERVICE{name=ServiceName}}) ->
+init({Mod, Options, Service=?REDIS_SD_SERVICE{name=ServiceName}}) ->
 	ok = redis_sd_server_service:disable(ServiceName),
 	ok = redis_sd_server_event:add_handler(redis_sd_event_handler, self()),
-	_Pid = case redneck:new_service(Service) of
-		{ok, P} ->
-			P;
-		{error, {already_started, P}} ->
-			P
+	_ = case redneck:new_service(Service) of
+		{ok, S} ->
+			S;
+		{error, {already_started, S}} ->
+			S
 	end,
 	{ok, Record=?REDIS_SD_DNS{}} = redis_sd_server:get_record(ServiceName),
 	{Node, Meta} = redneck_dns:to_endpoint(Record),
-	Child = case Mod:start_link(Node, Args) of
+	Child = case Mod:start_link(Node, Options) of
 		{ok, C} ->
 			C;
 		{error, {already_started, C}} ->
 			C
 	end,
-	Monitor = erlang:monitor(process, Child),
+	MonitorRef = erlang:monitor(process, Child),
 	State = #state{service=Service, record=Record, node=Node,
-		meta=Meta, child=Child, monitor=Monitor},
+		meta=Meta, child=Child, monitor=MonitorRef},
 	Tag = erlang:make_ref(),
 	Child ! {'$redneck_node', {syn, {self(), Tag}, Node, Meta}},
 	ok = redneck_internal:unregister_name({node_server, Node}),
@@ -125,6 +129,8 @@ handle_info({'$redis_sd', {service, terminate, Reason, ?REDIS_SD_SERVICE{name=Na
 	{stop, {error, {service_terminated, Reason}}, State};
 handle_info({'$redis_sd', _Event}, State) ->
 	{noreply, State};
+handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State=#state{child=Pid, monitor=MonitorRef}) ->
+	{stop, Reason, State};
 handle_info(Info, State) ->
 	error_logger:error_msg(
 		"** ~p ~p unhandled info in ~p/~p~n"

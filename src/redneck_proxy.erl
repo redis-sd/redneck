@@ -55,7 +55,7 @@ loop(ProxyTo, Monitor, Node, Timeout) ->
 			ProxyTo ! Message,
 			loop(ProxyTo, Monitor, Node, Timeout);
 		{{'$redneck_call', From=?REDNECK_NODE()}, Tag, Request} ->
-			ProxyTo ! redneck_msg:new(Node, From, Tag, Request),
+			ProxyTo ! redneck_msg:new(Node, From, Tag, {'$redneck_call', Request}),
 			loop(ProxyTo, Monitor, Node, Timeout);
 		Message ->
 			ProxyTo ! redneck_msg:new(Node, Message),
