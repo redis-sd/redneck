@@ -9,7 +9,7 @@
 %%% Created :  07 Feb 2014 by Andrew Bennett <andrew@pagodabox.com>
 %%%-------------------------------------------------------------------
 -module(redneck_node_server).
--behaviour(redneck_node).
+% -behaviour(redneck_node).
 -behaviour(gen_server).
 
 -include("redneck.hrl").
