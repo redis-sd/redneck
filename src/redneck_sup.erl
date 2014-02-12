@@ -88,6 +88,9 @@ stop_client(Node=?REDNECK_NODE()) ->
 init([]) ->
 	redneck = ets:new(redneck, [ordered_set, public, named_table]),
 	redneck_internal = ets:new(redneck_internal, [ordered_set, public, named_table]),
+	ManagerSpec = {redneck_event:manager(),
+		{gen_event, start_link, [{local, redneck_event:manager()}]},
+		permanent, 5000, worker, [gen_event]},
 	RingManagerSpec = {redneck_ring_event:manager(),
 		{gen_event, start_link, [{local, redneck_ring_event:manager()}]},
 		permanent, 5000, worker, [gen_event]},
@@ -109,6 +112,7 @@ init([]) ->
 	%% five restarts in 60 seconds, then shutdown
 	Restart = {rest_for_one, 5, 60},
 	{ok, {Restart, [
+		ManagerSpec,
 		RingManagerSpec,
 		NodeManagerSpec,
 		RedneckInternalSpec,
@@ -116,7 +120,6 @@ init([]) ->
 		ServerSpec,
 		KernelSpec
 	]}}.
-	% {ok, {Restart, [ManagerSpec, RedneckSpec, ServerSpec, KernelSpec]}}.
 
 %%%-------------------------------------------------------------------
 %%% Internal functions

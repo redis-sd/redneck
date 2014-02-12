@@ -414,6 +414,7 @@ maybe_connect(Key, Record=?REDIS_SD_DNS{}, Browse=?REDIS_SD_BROWSE{ref=BrowseRef
 					case R of
 						[] ->
 							true = ets:insert(?TAB, {{node, Node}, {BrowseRef, Key, Meta}, false}),
+							redneck_event:add(BrowseRef, Key, Node),
 							redneck_node_event:add(Node);
 						_ ->
 							ok
@@ -426,10 +427,11 @@ maybe_connect(Key, Record=?REDIS_SD_DNS{}, Browse=?REDIS_SD_BROWSE{ref=BrowseRef
 	end.
 
 %% @private
-maybe_disconnect(Key, Record=?REDIS_SD_DNS{}, Browse=?REDIS_SD_BROWSE{}) ->
+maybe_disconnect(Key, Record=?REDIS_SD_DNS{}, Browse=?REDIS_SD_BROWSE{ref=BrowseRef}) ->
 	case is_valid_node(Record, Browse) of
 		{true, Endpoint={Node=?REDNECK_NODE(), ?REDNECK_META{}}} ->
 			true = ets:delete(?TAB, {node, Node}),
+			redneck_event:expire(BrowseRef, Key, Node),
 			redneck_node_event:expire(Node),
 			_ = redneck_sup:start_worker(Endpoint, Key, Record, Browse, disconnect),
 			ok;
